@@ -1,0 +1,144 @@
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.0;
+
+import "./ERC721_NFT.sol";
+
+contract NFT_Maket is ERC721 {
+
+    struct MarketItem {
+        uint NftId;
+        address payable ownerNFT;
+        address payable buyer;
+        uint price;
+        bool sold;
+    }
+
+    uint internal totalSold;
+    uint internal totalNft;
+    bool internal locked;
+    uint private listingCost = 100 wei;
+    address payable marketOwner;
+    address payable contractThis;
+
+    mapping(uint => MarketItem) internal idToItem;
+
+    event SaleHistory(uint indexed NFTId, address indexed seller, address indexed buyer, uint price);
+
+    constructor() ERC721("Test Token", "TT") {
+        totalSold = 0;
+        totalNft = 0;
+        marketOwner = payable(msg.sender);
+        contractThis = payable(address(this));
+    }
+
+    modifier payLock() {
+         require(!locked, "No re-entrancy!");
+        locked = true;
+        _;
+        locked = false;
+    }
+
+    modifier priceCheck(uint price) {
+        require(price > 0, "Price cannot be zero.");
+        _;
+    }
+
+    modifier checkListingCost() {
+        require(listingCost == msg.value, "Have to pay listing cost");
+        _;
+    }
+
+    function createNFT(uint256 _price) public payable priceCheck(_price) checkListingCost {
+        totalNft += 1;
+        idToItem[totalNft] = MarketItem({NftId: totalNft, ownerNFT: payable(msg.sender), buyer: payable(address(this)), price: _price, sold: false});
+        (bool status, ) = contractThis.call{value: msg.value}("");
+        // require(status, "Lisiting price.");
+        _mint(msg.sender, totalNft);
+    }
+
+    function getCollectionName() external view returns (string memory _name, string memory _symbol) {
+        _name = name;
+        _symbol = symbol;
+    }
+
+    function getNFTDetails(uint id) external view returns (uint NFTId, address owner, address buyer, uint price, bool sold) {
+        return (idToItem[id].NftId, idToItem[id].ownerNFT, idToItem[id].buyer, idToItem[id].price, idToItem[id].sold);
+    }
+
+    function getListingPrice() external view returns (uint) {
+        return listingCost;
+    }
+
+    function setListingPrice(uint price) external {
+        assert(marketOwner == payable(msg.sender));
+        listingCost = price;
+    }
+
+    function sellNFT(uint id) external payable {
+        uint price = idToItem[id].price;
+        address seller = idToItem[id].ownerNFT;
+        require(msg.value == price, "Amount entered is invalid");
+        idToItem[id].buyer =  payable(msg.sender);
+        idToItem[id].ownerNFT = payable(0x0);
+        idToItem[id].sold = true;
+        totalSold++;
+        (bool status, ) = payable(marketOwner).call{value: listingCost}("");
+        assert(status);
+        (status, ) = payable(seller).call{value: msg.value}("");
+        assert(status);
+    }
+
+    function reSellNFT(uint id, uint price) external payable priceCheck(price) checkListingCost {
+        assert(idToItem[id].buyer == msg.sender);
+        idToItem[id].sold = false;
+        idToItem[id].price = price;
+        idToItem[id].ownerNFT = payable(msg.sender);
+        idToItem[id].buyer = payable(address(this));
+        totalSold--;
+
+    }
+
+   function getMarketNFT() external view returns (uint[] memory nftIDs) {
+       uint currentNft = totalNft;
+       uint totalNftInMarket = currentNft - totalSold;
+       uint[] memory marketNftId = new uint[](totalNftInMarket);
+       uint index = 0;
+
+       for(uint i =1; i<=currentNft; i++) {
+           if(idToItem[i].buyer == payable(address(this))) {
+               marketNftId[index] = idToItem[i].NftId;
+               index++;
+           }
+       }
+
+        nftIDs = marketNftId;
+   }
+
+   function myNft() external view returns (uint[] memory) {
+       uint totalItemCount = totalNft;
+       uint itemCount = 0;
+       uint currentIndex = 0;
+
+      for (uint i = 1; i <= totalItemCount; i++) {
+        if (idToItem[i].ownerNFT == payable(msg.sender)) {
+          itemCount += 1;
+        }
+      }
+
+      uint[] memory items = new uint[](itemCount);
+      for (uint i = 0; i < totalItemCount; i++) {
+        if (idToItem[i].ownerNFT == msg.sender) {
+          uint currentId = i + 1;
+          items[currentIndex] = idToItem[currentId].NftId;
+          currentIndex += 1;
+        }
+      }
+      return items;
+   }
+
+   function balanceContract() external view returns (uint) {
+       return address(this).balance;
+   }
+
+}
+
